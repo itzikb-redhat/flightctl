@@ -214,9 +214,7 @@ var _ = Describe("Device lifecycles and embedded hooks tests", func() {
 			err = harness.WaitForDeviceNewRenderedVersion(deviceId, nextRenderedVersion)
 			Expect(err).ToNot(HaveOccurred())
 			// ensure we see our expected messages
-			logs, err := harness.ReadPrimaryVMAgentLogs("")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(logs).To(And(ContainSubstring(templateHookDirectory), ContainSubstring(firstFileContents)))
+			harness.WaitForLogContentWithTimeout(TIMEOUT, POLLING, "", templateHookDirectory, firstFileContents)
 
 			By("adding a second file, and updating the first file to the hooks watch directory")
 			nextRenderedVersion, err = harness.PrepareNextDeviceVersion(deviceId)
@@ -240,9 +238,7 @@ var _ = Describe("Device lifecycles and embedded hooks tests", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// ensure we see our expected messages
-			logs, err = harness.ReadPrimaryVMAgentLogs("")
-			Expect(err).NotTo(HaveOccurred())
-			Expect(logs).To(And(ContainSubstring(firstFileUpdatedContents), ContainSubstring(secondFileContents)))
+			harness.WaitForLogContentWithTimeout(TIMEOUT, POLLING, "", firstFileUpdatedContents, secondFileContents)
 		})
 	})
 })

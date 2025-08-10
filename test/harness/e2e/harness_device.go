@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/flightctl/flightctl/api/v1alpha1"
 	apiclient "github.com/flightctl/flightctl/internal/api/client"
+	"github.com/flightctl/flightctl/test/harness/e2e/vm"
 	"github.com/flightctl/flightctl/test/util"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -655,4 +657,37 @@ func (h *Harness) ResetAgent() error {
 		return fmt.Errorf("failed to send SIGHUP to agent: %w", err)
 	}
 	return nil
+}
+
+// WaitForLogContentWithTimeout looks for a strings in the journal logs until a
+// timeout is reached. polling and timeout are in seconds.
+func (h *Harness) WaitForLogContentWithTimeout(timeout, polling int64, unit string, expectedContent ...string) error {
+	ticker := time.NewTicker(time.Duration(polling) * time.Second)
+	defer ticker.Stop()
+	timeoutChan := time.After(time.Duration(timeout))
+	contains := true
+
+	for {
+		select {
+		case <-ticker.C:
+			logs, err := h.VM.JournalLogs(vm.JournalOpts{
+				Unit:  unit,
+				Since: "",
+			})
+			if err != nil {
+				return fmt.Errorf("failed to get journal logs: %w", err)
+			}
+			for _, content := range expectedContent {
+				if !strings.Contains(logs, content) {
+					contains = false
+				}
+			}
+			if contains {
+				return nil
+			}
+		case <-timeoutChan:
+			return fmt.Errorf("timeout reached while waiting for content to appear",
+				" in journal logs")
+		}
+	}
 }
