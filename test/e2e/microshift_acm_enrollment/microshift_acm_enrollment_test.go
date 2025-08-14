@@ -21,7 +21,7 @@ var _ = Describe("Microshift cluster ACM enrollment tests", func() {
 	Describe("Test Setup", Ordered, func() {
 
 		BeforeAll(func() {
-			isAcmInstalled, err := isAcmInstalled()
+			isAcmInstalled, err := util.IsAcmInstalled()
 			if err != nil {
 				logrus.Warnf("An error happened %v", err)
 			}
@@ -330,23 +330,6 @@ func getAcmNamespace() (string, error) {
 	logrus.Infof("This is the Acm namespace: %s", outputClean)
 
 	return outputClean, nil
-}
-
-func isAcmInstalled() (bool, error) {
-	cmd := exec.Command("oc", "get", "multiclusterhub", "-A")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, err
-	}
-	outputString := string(output)
-	if outputString == "error: the server doesn't have a resource type \"multiclusterhub\"" {
-		return false, fmt.Errorf("ACM is not installed: %s", outputString)
-	}
-	if strings.Contains(outputString, "Running") || strings.Contains(outputString, "Paused") {
-		logrus.Infof("The cluster has ACM installed")
-		return true, nil
-	}
-	return false, fmt.Errorf("multiclusterhub is not in Running status")
 }
 
 func waitForMicroshiftReady(harness *e2e.Harness, kubeconfigPath string) error {
