@@ -585,6 +585,12 @@ func (h *Harness) parseImageReference(image string) (string, string) {
 	return repo, tag
 }
 
+func (h *Harness) CleanUpResource(resourceType string, resourceName string) (string, error) {
+	logrus.Infof("Deleting resource %s of resource type %s", resourceName, resourceType)
+	resource := resourceType + "/" + resourceName
+	return h.CLI("delete", resource)
+}
+
 func (h *Harness) CleanUpResources(resourceType string) (string, error) {
 	logrus.Infof("Deleting the instances of the %s resource type", resourceType)
 
