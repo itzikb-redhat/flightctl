@@ -2,6 +2,7 @@ package rbac_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,9 +41,11 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 
 	roles := []string{
 		"rbac-test-admin-role",
+		"rbac-test-user-role",
 	}
 	roleBindings := []string{
 		"rbac-test-admin-role-binding",
+		"rbac-test-user-role-binding",
 	}
 
 	BeforeEach(func() {
@@ -104,18 +107,8 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Login to the cluster by a user without a role")
-			cmd := exec.Command("bash", "-c", "oc whoami --show-server")
-			kubernetesApiEndpoint, err := cmd.CombinedOutput()
-			Expect(err).ToNot(HaveOccurred(), "Failed to get kubernetes api endpoint")
-
-			loginCommand := fmt.Sprintf("oc login -u %s -p %s %s", nonAdminUser, nonAdminUser, string(kubernetesApiEndpoint))
-			cmd = exec.Command("bash", "-c", loginCommand)
-			err = cmd.Run()
+			err = loginCluster(harness, nonAdminUser, nonAdminUser)
 			Expect(err).ToNot(HaveOccurred())
-			defer ChangeContext("default")
-
-			method := login.LoginToAPIWithToken(harness)
-			Expect(method).ToNot(Equal(login.AuthDisabled))
 
 			By("Testing device operations - admin should have full access")
 			By("Testing creating a device")
@@ -156,7 +149,7 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			logrus.Println("fleetData: ", string(fleetData))
 			out, err = harness.CLIWithStdin(string(fleetData), "apply", "-f", "-")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(out).To(MatchRegexp(`(200 OK|201 Created)`))
+			Expect(out).To(MatchRegexp(`(201 Created)`))
 
 			By("Testing updating a fleet")
 			fleet.Metadata.Labels = &map[string]string{"test": "rbac-admin"}
@@ -233,6 +226,106 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			Expect(err).To(HaveOccurred(), "A user without a role should not be able to list repositories")
 		})
 	})
+	Context("FlightCtl User Role", func() {
+		userRole := &rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "rbac-test-user-role",
+				Namespace: flightCtlNs,
+			},
+		}
+
+		listDevicesRule := []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"flightctl.io"},
+				Resources: []string{"devices"},
+				Verbs:     []string{"list"},
+			},
+		}
+
+		listFleetsRule := []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"flightctl.io"},
+				Resources: []string{"fleets"},
+				Verbs:     []string{"list"},
+			},
+		}
+
+		userRoleBinding := &rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "rbac-test-user-role-binding",
+				Namespace: flightCtlNs,
+			},
+		}
+		userRoleBinding.RoleRef = rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     "rbac-test-user-role",
+		}
+		userRoleBinding.Subjects = []rbacv1.Subject{
+			{
+				Kind: "User",
+				Name: nonAdminUser,
+			},
+		}
+
+		It("should have limited access to resources and operations", Label("sanity", "84169"), func() {
+			By("Creating a user role and a role binding")
+			var err error
+			//userRole, err := createRole(harness.Cluster, flightCtlNs, userRole)
+			//Expect(err).ToNot(HaveOccurred())
+
+			userRole.Rules = listDevicesRule
+			userRole, err = createRole(harness.Cluster, flightCtlNs, userRole)
+			Expect(err).ToNot(HaveOccurred())
+
+			userRoleBinding, err := createRoleBinding(harness.Cluster, flightCtlNs, userRoleBinding)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Logging in with the user")
+			err = loginCluster(harness, nonAdminUser, nonAdminUser)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Testing listing devices - should be able to list")
+			_, err = harness.CLI("get", "devices")
+			Expect(err).ToNot(HaveOccurred(), "A user with a role with list devices permission should be able to list devices")
+
+			By("Testing listing fleets - should not be able to list")
+			_, err = harness.CLI("get", "fleets")
+			Expect(err).To(HaveOccurred(), "A user with a role without list fleets permission should not be able to list fleets")
+
+			ChangeContext("default")
+			userRole.Rules = listFleetsRule
+			userRole, err = updateRole(harness.Cluster, flightCtlNs, userRole)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Testing listing devices - should not be able to list")
+			_, err = harness.CLI("get", "devices")
+			Expect(err).To(HaveOccurred(), "A user with a role without list fleets permission should not be able to list devices")
+
+			By("Testing listing fleets - should be able to list")
+			_, err = harness.CLI("get", "fleets")
+			Expect(err).ToNot(HaveOccurred(), "A user with a role with list fleets permission should be able to list fleets")
+
+			userRole.Rules = []rbacv1.PolicyRule{}
+			userRole, err = updateRole(harness.Cluster, flightCtlNs, userRole)
+			Expect(err).ToNot(HaveOccurred())
+
+			err = DeleteRole(suiteCtx, harness.Cluster, flightCtlNs, userRole.Name)
+			Expect(err).ToNot(HaveOccurred(), "Error deleting role %s: %v", userRole.Name, err)
+
+			err = DeleteRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, userRoleBinding.Name)
+			Expect(err).ToNot(HaveOccurred(), "Error deleting role binding %s: %v", userRoleBinding.Name, err)
+
+			By("Testing listing devices - should not be able to list")
+			_, err = harness.CLI("get", "devices")
+			Expect(err).To(HaveOccurred(), "A user without a role should not be able to list devices")
+
+			By("Testing listing fleets - should not be able to list")
+			_, err = harness.CLI("get", "fleets")
+			Expect(err).To(HaveOccurred(), "A user without a role should not be able to list fleets")
+
+		})
+	})
 })
 
 func ChangeContext(k8sContext string) {
@@ -257,6 +350,11 @@ func createRole(kubenetesClient kubernetes.Interface, flightCtlNs string, role *
 func createRoleBinding(kubenetesClient kubernetes.Interface, flightCtlNs string, roleBinding *rbacv1.RoleBinding) (*rbacv1.RoleBinding, error) {
 	roleBinding, err := kubenetesClient.RbacV1().RoleBindings(flightCtlNs).Create(suiteCtx, roleBinding, metav1.CreateOptions{})
 	return roleBinding, err
+}
+
+func updateRole(kubenetesClient kubernetes.Interface, flightCtlNs string, role *rbacv1.Role) (*rbacv1.Role, error) {
+	role, err := kubenetesClient.RbacV1().Roles(flightCtlNs).Update(suiteCtx, role, metav1.UpdateOptions{})
+	return role, err
 }
 
 func cleanupResources(flightCtlResources []flightCtlResource, roles []string, roleBindings []string, harness *e2e.Harness, suiteCtx context.Context, flightCtlNs string) {
@@ -285,4 +383,22 @@ func cleanupResources(flightCtlResources []flightCtlResource, roles []string, ro
 			logrus.Infof("Deleted role binding %s", roleBinding)
 		}
 	}
+}
+
+func loginCluster(harness *e2e.Harness, user string, password string) error {
+	ChangeContext("default")
+	cmd := exec.Command("bash", "-c", "oc whoami --show-server")
+	kubernetesApiEndpoint, err := cmd.CombinedOutput()
+	Expect(err).ToNot(HaveOccurred(), "Failed to get kubernetes api endpoint")
+	loginCommand := fmt.Sprintf("oc login -u %s -p %s %s", user, password, string(kubernetesApiEndpoint))
+	cmd = exec.Command("bash", "-c", loginCommand)
+	err = cmd.Run()
+	Expect(err).ToNot(HaveOccurred())
+
+	method := login.LoginToAPIWithToken(harness)
+	Expect(method).ToNot(Equal(login.AuthDisabled))
+	if method == login.AuthDisabled {
+		return errors.New("Login is disabled")
+	}
+	return nil
 }
