@@ -111,80 +111,51 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			err = loginAsNotAdmin(harness, nonAdminUser, nonAdminUser)
 			Expect(err).ToNot(HaveOccurred())
 
-			By("Testing device operations - admin should have full access")
-			By("Testing creating a device")
-			deviceResource, deviceName, deviceData, err := createResource(harness, "device", resourceYamls, flightCtlResources)
-			Expect(err).ToNot(HaveOccurred())
-			device, ok := deviceResource.(*v1alpha1.Device)
-			Expect(ok).To(BeTrue())
+			for _, resourceType := range []string{"device", "fleet", "repository"} {
+				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
+				By(fmt.Sprintf("Testing creating a %s", resourceType))
+				resource, resourceName, resourceData, err := createResource(harness, resourceType, resourceYamls, flightCtlResources)
+				Expect(err).ToNot(HaveOccurred())
 
-			By("Testing updating a device")
-			err = updateResource(harness, device, deviceData, adminTestLabels)
-			Expect(err).ToNot(HaveOccurred())
+				switch resourceType {
+				case "device":
+					device, ok := resource.(*v1alpha1.Device)
+					Expect(ok).To(BeTrue())
+					By("Testing updating a device")
+					err = updateResource(harness, device, resourceData, adminTestLabels)
+					Expect(err).ToNot(HaveOccurred())
+				case "fleet":
+					fleet, ok := resource.(*v1alpha1.Fleet)
+					Expect(ok).To(BeTrue())
+					By("Testing updating a fleet")
+					err = updateResource(harness, fleet, resourceData, adminTestLabels)
+					Expect(err).ToNot(HaveOccurred())
+				case "repository":
+					repository, ok := resource.(*v1alpha1.Repository)
+					Expect(ok).To(BeTrue())
+					By("Testing updating a repository")
+					err = updateResource(harness, repository, resourceData, adminTestLabels)
+					Expect(err).ToNot(HaveOccurred())
+				}
+				By(fmt.Sprintf("Testing getting a specific %s", resourceType))
+				_, err = harness.GetResourcesByName(resourceType, resourceName)
+				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to get specific %s", resourceType))
 
-			By("Testing getting a specific device")
-			_, err = harness.GetResourcesByName("device", deviceName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to get specific device")
+				By(fmt.Sprintf("Testing listing %s", resourceType))
+				_, err = harness.GetResourcesByName(resourceType)
+				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
 
-			By("Testing deleting a device")
-			_, err = harness.CLI("delete", "device"+"/"+deviceName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete devices")
+				By(fmt.Sprintf("Testing deleting a %s", resourceType))
+				_, err = harness.CLI("delete", resourceType, resourceName)
+				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to delete %s", resourceType))
+			}
 
-			By("Testing fleet operations - admin should have full access")
-			By("Testing creating a fleet")
-			fleetResource, fleetName, fleetData, err := createResource(harness, "fleet", resourceYamls, flightCtlResources)
-			Expect(err).ToNot(HaveOccurred())
-			fleet, ok := fleetResource.(*v1alpha1.Fleet)
-			Expect(ok).To(BeTrue())
-
-			By("Testing updating a fleet")
-			err = updateResource(harness, fleet, fleetData, adminTestLabels)
-			Expect(err).ToNot(HaveOccurred())
-
-			By("Testing listing fleets")
-			_, err = harness.GetResourcesByName("fleets")
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to list fleets")
-
-			By("Testing getting a specific fleet")
-			_, err = harness.GetResourcesByName("fleet", fleetName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to get specific fleet")
-
-			By("Testing deleting a fleet")
-			_, err = harness.CLI("delete", "fleet", fleetName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete fleets")
-
-			By("Testing repository operations - admin should have full access")
-			By("Testing creating a repository")
-			repoResource, repoName, repoData, err := createResource(harness, "repository", resourceYamls, flightCtlResources)
-			Expect(err).ToNot(HaveOccurred())
-			repo, ok := repoResource.(*v1alpha1.Repository)
-			Expect(ok).To(BeTrue())
-
-			By("Testing updating a repository")
-			err = updateResource(harness, repo, repoData, adminTestLabels)
-			Expect(err).ToNot(HaveOccurred())
-
-			By("Testing listing repositories")
-			_, err = harness.GetResourcesByName("repositories")
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to list repositories")
-
-			By("Testing getting a specific repository")
-			_, err = harness.GetResourcesByName("repository", repoName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to get specific repository")
-
-			By("Testing deleting a repository")
-			_, err = harness.CLI("delete", "repository", repoName)
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete repositories")
-
-			By("Testing enrollment request operations - admin should have full access")
-			By("Testing listing enrollment requests")
-			_, err = harness.GetResourcesByName("enrollmentrequests")
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to list enrollment requests")
-
-			By("Testing events access - admin should have access")
-			By("Testing listing events")
-			_, err = harness.GetResourcesByName("events")
-			Expect(err).ToNot(HaveOccurred(), "Admin should be able to list events")
+			for _, resourceType := range []string{"enrollmentrequests", "events"} {
+				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
+				By(fmt.Sprintf("Testing listing %s", resourceType))
+				_, err = harness.GetResourcesByName(resourceType)
+				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
+			}
 
 			By("Deleting the admin role and role binding")
 			ChangeContext("default")
