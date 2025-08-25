@@ -63,6 +63,8 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 
 	AfterEach(func() {
 		ChangeContext("default")
+		harness := e2e.GetWorkerHarness()
+		suiteCtx := e2e.GetWorkerContext()
 		login.LoginToAPIWithToken(harness)
 		cleanupResources(flightCtlResources, roles, roleBindings, harness, suiteCtx, flightCtlNs)
 	})
