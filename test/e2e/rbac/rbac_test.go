@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -33,15 +32,13 @@ type flightCtlResource struct {
 }
 
 var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), func() {
-	var harness *e2e.Harness
-	var flightCtlNs string
-
-	resourceYamls := map[string]string{
-		"device":     util.GetTestExamplesYamlPath("device.yaml"),
-		"fleet":      util.GetTestExamplesYamlPath("fleet.yaml"),
-		"repository": util.GetTestExamplesYamlPath("repository-flightctl.yaml"),
-	}
-	var flightCtlResources []flightCtlResource
+	var (
+		harness            *e2e.Harness
+		suiteCtx           context.Context
+		flightCtlResources []flightCtlResource
+		defaultK8sContext  string
+		k8sApiEndpoint     string
+	)
 
 	roles := []string{
 		adminRoleName,
@@ -49,20 +46,26 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 	roleBindings := []string{
 		adminRoleBindingName,
 	}
-
 	adminTestLabels := &map[string]string{"test": "rbac-admin"}
 
 	BeforeEach(func() {
-		flightCtlNs = os.Getenv("FLIGHTCTL_NS")
-		if flightCtlNs == "" {
-			Skip("FLIGHTCTL_NS evironment variable should be set")
-		}
-		harness = e2e.NewTestHarness(suiteCtx)
+		// Get the harness and context set up by the suite
+		harness = e2e.GetWorkerHarness()
+		suiteCtx = e2e.GetWorkerContext()
+
+		// Get the default K8s context
+		var err error
+		defaultK8sContext, err = getDefaultK8sContext()
+		Expect(err).ToNot(HaveOccurred(), "Failed to get default K8s context")
+		k8sApiEndpoint, err = getK8sApiEndpoint(harness, defaultK8sContext)
+		Expect(err).ToNot(HaveOccurred(), "Failed to get Kubernetes API endpoint")
+
 		flightCtlResources = []flightCtlResource{}
 	})
 
 	AfterEach(func() {
-		ChangeContext("default")
+		changeK8sContext(harness, defaultK8sContext)
+
 		login.LoginToAPIWithToken(harness)
 		cleanupResources(flightCtlResources, roles, roleBindings, harness, suiteCtx, flightCtlNs)
 	})
@@ -101,20 +104,19 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 
 		It("should have full access to all resources and operations", Label("sanity", "83842"), func() {
 			By("Creating an admin role and a role binding")
-			adminRole, err := createRole(harness.Cluster, flightCtlNs, adminRole)
+			createdAdminRole, err := createRole(suiteCtx, harness.Cluster, flightCtlNs, adminRole)
 			Expect(err).ToNot(HaveOccurred())
-
-			adminRoleBinding, err := createRoleBinding(harness.Cluster, flightCtlNs, adminRoleBinding)
+			createdAdminRoleBinding, err := createRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, adminRoleBinding)
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Login to the cluster by a user without a role")
-			err = loginAsNotAdmin(harness, nonAdminUser, nonAdminUser)
+			err = loginAsNonAdmin(harness, nonAdminUser, nonAdminUser, defaultK8sContext, k8sApiEndpoint)
 			Expect(err).ToNot(HaveOccurred())
 
 			for _, resourceType := range []string{"device", "fleet", "repository"} {
 				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
 				By(fmt.Sprintf("Testing creating a %s", resourceType))
-				resource, resourceName, resourceData, err := createResource(harness, resourceType, resourceYamls, flightCtlResources)
+				resource, resourceName, resourceData, err := createResource(harness, resourceType, flightCtlResources)
 				Expect(err).ToNot(HaveOccurred())
 
 				switch resourceType {
@@ -158,10 +160,10 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			}
 
 			By("Deleting the admin role and role binding")
-			ChangeContext("default")
-			err = deleteRole(suiteCtx, harness.Cluster, flightCtlNs, adminRole.Name)
+			changeK8sContext(harness, defaultK8sContext)
+			err = deleteRole(suiteCtx, harness.Cluster, flightCtlNs, createdAdminRole.Name)
 			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete role")
-			err = deleteRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, adminRoleBinding.Name)
+			err = deleteRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, createdAdminRoleBinding.Name)
 			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete role binding")
 
 			By("Testing listing repositories without a role - should not be able to list")
@@ -171,10 +173,14 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 	})
 })
 
-func ChangeContext(k8sContext string) {
-	cmd := exec.Command("oc", "config", "use-context", k8sContext)
-	err := cmd.Run()
-	Expect(err).ToNot(HaveOccurred())
+func changeK8sContext(harness *e2e.Harness, k8sContext string) {
+	cmd := exec.Command("bash", "-c", "kubectl config use-context "+k8sContext)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		GinkgoWriter.Printf("❌ Failed to change context to %s: %v\n", k8sContext, err)
+	} else {
+		GinkgoWriter.Printf("✅ Changed context to %s: %s\n", k8sContext, output)
+	}
 }
 
 func addTestLabel(resource interface{}, labels *map[string]string) error {
@@ -201,13 +207,32 @@ func deleteRole(ctx context.Context, client kubernetes.Interface, namespace stri
 	return client.RbacV1().Roles(namespace).Delete(ctx, roleName, metav1.DeleteOptions{})
 }
 
-func createRole(kubenetesClient kubernetes.Interface, flightCtlNs string, role *rbacv1.Role) (*rbacv1.Role, error) {
-	role, err := kubenetesClient.RbacV1().Roles(flightCtlNs).Create(suiteCtx, role, metav1.CreateOptions{})
+func createRole(ctx context.Context, kubenetesClient kubernetes.Interface, flightCtlNs string, role *rbacv1.Role) (*rbacv1.Role, error) {
+	if ctx == nil {
+		return nil, errors.New("context cannot be nil")
+	}
+	if role == nil {
+		return nil, errors.New("role parameter cannot be nil")
+	}
+	if flightCtlNs == "" {
+		return nil, errors.New("namespace cannot be empty")
+	}
+
+	role, err := kubenetesClient.RbacV1().Roles(flightCtlNs).Create(ctx, role, metav1.CreateOptions{})
 	return role, err
 }
 
-func createRoleBinding(kubenetesClient kubernetes.Interface, flightCtlNs string, roleBinding *rbacv1.RoleBinding) (*rbacv1.RoleBinding, error) {
-	roleBinding, err := kubenetesClient.RbacV1().RoleBindings(flightCtlNs).Create(suiteCtx, roleBinding, metav1.CreateOptions{})
+func createRoleBinding(ctx context.Context, kubenetesClient kubernetes.Interface, flightCtlNs string, roleBinding *rbacv1.RoleBinding) (*rbacv1.RoleBinding, error) {
+	if ctx == nil {
+		return nil, errors.New("context cannot be nil")
+	}
+	if roleBinding == nil {
+		return nil, errors.New("roleBinding cannot be nil")
+	}
+	if flightCtlNs == "" {
+		return nil, errors.New("namespace cannot be empty")
+	}
+	roleBinding, err := kubenetesClient.RbacV1().RoleBindings(flightCtlNs).Create(ctx, roleBinding, metav1.CreateOptions{})
 	return roleBinding, err
 }
 
@@ -217,7 +242,7 @@ func cleanupResources(flightCtlResources []flightCtlResource, roles []string, ro
 		if err != nil {
 			logrus.Errorf("Failed to clean up resource %s of resource type %s: %v", resource.ResourceName, resource.ResourceType, err)
 		} else {
-			logrus.Infof("Cleaned up resource %s of resource type %s: %s", resource.ResourceName, resource.ResourceType, output)
+			GinkgoWriter.Printf("Cleaned up resource %s of resource type %s: %s", resource.ResourceName, resource.ResourceType, output)
 		}
 	}
 
@@ -226,7 +251,7 @@ func cleanupResources(flightCtlResources []flightCtlResource, roles []string, ro
 		if err != nil {
 			logrus.Errorf("Failed to delete role %s: %v", role, err)
 		} else {
-			logrus.Infof("Deleted role %s", role)
+			GinkgoWriter.Printf("Deleted role %s", role)
 		}
 	}
 	for _, roleBinding := range roleBindings {
@@ -234,31 +259,37 @@ func cleanupResources(flightCtlResources []flightCtlResource, roles []string, ro
 		if err != nil {
 			logrus.Errorf("Failed to delete role binding %s: %v", roleBinding, err)
 		} else {
-			logrus.Infof("Deleted role binding %s", roleBinding)
+			GinkgoWriter.Printf("Deleted role binding %s", roleBinding)
 		}
 	}
 }
 
-func createResource(harness *e2e.Harness, resourceType string, resourceYamls map[string]string, flightCtlResources []flightCtlResource) (interface{}, string, []byte, error) {
-	out, err := harness.CLI("apply", "-f", resourceYamls[resourceType])
+func createResource(harness *e2e.Harness, resourceType string, flightCtlResources []flightCtlResource) (interface{}, string, []byte, error) {
+	uniqueResourceYAML, err := util.CreateUniqueYAMLFile(resourceType+".yaml", harness.GetTestIDFromContext())
 	if err != nil {
 		return nil, "", nil, err
 	}
-	if strings.Contains(out, "201 Created") || strings.Contains(out, "200 OK") {
+	defer util.CleanupTempYAMLFile(uniqueResourceYAML)
+
+	applyOutput, err := harness.CLI("apply", "-f", uniqueResourceYAML)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if strings.Contains(applyOutput, "201 Created") || strings.Contains(applyOutput, "200 OK") {
 		var resource interface{}
 		var resourceName *string
 
 		switch resourceType {
 		case "device":
-			dev := harness.GetDeviceByYaml(resourceYamls[resourceType])
+			dev := harness.GetDeviceByYaml(uniqueResourceYAML)
 			resource = &dev
 			resourceName = dev.Metadata.Name
 		case "fleet":
-			fleet := harness.GetFleetByYaml(resourceYamls[resourceType])
+			fleet := harness.GetFleetByYaml(uniqueResourceYAML)
 			resource = &fleet
 			resourceName = fleet.Metadata.Name
 		case "repository":
-			repo := harness.GetRepositoryByYaml(resourceYamls[resourceType])
+			repo := harness.GetRepositoryByYaml(uniqueResourceYAML)
 			resource = &repo
 			resourceName = repo.Metadata.Name
 		default:
@@ -272,29 +303,56 @@ func createResource(harness *e2e.Harness, resourceType string, resourceYamls map
 		}
 		return resource, *resourceName, resourceData, nil
 	} else {
-		logrus.Println("output: ", out)
+		GinkgoWriter.Printf("Apply output: %s\n", applyOutput)
 		return nil, "", nil, fmt.Errorf("Failed to create a %s", resourceType)
 	}
 }
 
 func updateResource(harness *e2e.Harness, resource interface{}, resourceData []byte, labels *map[string]string) error {
 	addTestLabel(resource, labels)
-	out, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
-	if err != nil || !strings.Contains(out, "200 OK") {
+	updateOutput, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
+	if err != nil || !strings.Contains(updateOutput, "200 OK") {
 		return err
 	}
 	return nil
 }
 
-func loginAsNotAdmin(harness *e2e.Harness, user string, password string) error {
-	ChangeContext("default")
+func getDefaultK8sContext() (string, error) {
+	cmd := exec.Command("kubectl", "config", "get-contexts", "-o", "name")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("Failed to get contexts: %v", err)
+	}
+
+	contexts := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for _, context := range contexts {
+		if strings.Contains(context, "default") {
+			GinkgoWriter.Printf("🔍 [DEBUG] Found default context: %s\n", context)
+			return context, nil
+		}
+	}
+	return "", fmt.Errorf("no context with 'default' in name found")
+}
+
+func getK8sApiEndpoint(harness *e2e.Harness, k8sContext string) (string, error) {
+	changeK8sContext(harness, k8sContext)
 	cmd := exec.Command("bash", "-c", "oc whoami --show-server")
-	kubernetesApiEndpoint, err := cmd.CombinedOutput()
-	Expect(err).ToNot(HaveOccurred(), "Failed to get kubernetes api endpoint")
-	loginCommand := fmt.Sprintf("oc login -u %s -p %s %s", user, password, string(kubernetesApiEndpoint))
-	cmd = exec.Command("bash", "-c", loginCommand)
-	err = cmd.Run()
-	Expect(err).ToNot(HaveOccurred())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("Failed to get Kubernetes API endpoint: %v", err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func loginAsNonAdmin(harness *e2e.Harness, user string, password string, k8sContext string, k8sApiEndpoint string) error {
+	loginCommand := fmt.Sprintf("oc login -u %s -p %s %s", user, password, k8sApiEndpoint)
+	cmd := exec.Command("bash", "-c", loginCommand)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("Failed to login to Kubernetes cluster as non-admin: %v %v", loginCommand, err)
+	} else {
+		GinkgoWriter.Printf("✅ Logged in to Kubernetes cluster as non-admin: %s", loginCommand)
+	}
 
 	method := login.LoginToAPIWithToken(harness)
 	Expect(method).ToNot(Equal(login.AuthDisabled))

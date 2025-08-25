@@ -557,6 +557,7 @@ func (h *Harness) parseImageReference(image string) (string, string) {
 
 func (h *Harness) CleanUpAllTestResources() error {
 	return h.CleanUpTestResources(util.ResourceTypes[:]...)
+}
 
 func (h *Harness) CleanUpResource(resourceType string, resourceName string) (string, error) {
 	logrus.Infof("Deleting resource %s of resource type %s", resourceName, resourceType)
