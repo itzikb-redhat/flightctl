@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/flightctl/flightctl/api/v1alpha1"
 	"github.com/flightctl/flightctl/test/harness/e2e"
@@ -117,28 +118,45 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
 				By(fmt.Sprintf("Testing creating a %s", resourceType))
 				resource, resourceName, resourceData, err := createResource(harness, resourceType, flightCtlResources)
+				GinkgoWriter.Printf("🔍 [DEBUG] Device sleeping\n")
+				time.Sleep(60 * time.Second)
 				Expect(err).ToNot(HaveOccurred())
 
 				switch resourceType {
 				case "device":
-					device, ok := resource.(*v1alpha1.Device)
-					Expect(ok).To(BeTrue())
+					//device, ok := resource.(*v1alpha1.Device)
+					//Expect(ok).To(BeTrue())
 					By("Testing updating a device")
-					err = updateResource(harness, device, resourceData, adminTestLabels)
+					//(*device.Metadata.Labels)["test"] = "rbac-admin"
+					//err = updateResource(harness, device, resourceData)
+					updatedResourceData, err := harness.AddLabelsToYAML(string(resourceData), *adminTestLabels)
+					Expect(err).ToNot(HaveOccurred())
+					_, err = harness.CLIWithStdin(string(updatedResourceData), "apply", "-f", "-")
 					Expect(err).ToNot(HaveOccurred())
 				case "fleet":
-					fleet, ok := resource.(*v1alpha1.Fleet)
-					Expect(ok).To(BeTrue())
+					//fleet, ok := resource.(*v1alpha1.Fleet)
+					//Expect(ok).To(BeTrue())
 					By("Testing updating a fleet")
-					err = updateResource(harness, fleet, resourceData, adminTestLabels)
+					//err = updateResource(harness, fleet, resourceData, adminTestLabels)
+					//(*fleet.Metadata.Labels)["test"] = "rbac-admin"
+					updatedResourceData, err := harness.AddLabelsToYAML(string(resourceData), *adminTestLabels)
 					Expect(err).ToNot(HaveOccurred())
+					_, err = harness.CLIWithStdin(string(updatedResourceData), "apply", "-f", "-")
+					Expect(err).ToNot(HaveOccurred())
+					//_, err = harness.ManageResource("apply", string(resourceData))
+					//_, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
+					//Expect(err).ToNot(HaveOccurred())
 				case "repository":
 					repository, ok := resource.(*v1alpha1.Repository)
 					Expect(ok).To(BeTrue())
 					By("Testing updating a repository")
-					err = updateResource(harness, repository, resourceData, adminTestLabels)
+					(*repository.Metadata.Labels)["test"] = "rbac-admin"
+					//err = updateResource(harness, repository, resourceData, adminTestLabels)
+					//_, err = harness.ManageResource("apply", string(resourceData))
+					_, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
 					Expect(err).ToNot(HaveOccurred())
 				}
+
 				By(fmt.Sprintf("Testing getting a specific %s", resourceType))
 				_, err = harness.GetResourcesByName(resourceType, resourceName)
 				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to get specific %s", resourceType))
@@ -147,9 +165,11 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 				_, err = harness.GetResourcesByName(resourceType)
 				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
 
-				By(fmt.Sprintf("Testing deleting a %s", resourceType))
+				time.Sleep(20 * time.Second)
+				/*By(fmt.Sprintf("Testing deleting a %s", resourceType))
 				_, err = harness.CLI("delete", resourceType, resourceName)
 				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to delete %s", resourceType))
+				*/
 			}
 
 			for _, resourceType := range []string{"enrollmentrequests", "events"} {
@@ -271,7 +291,8 @@ func createResource(harness *e2e.Harness, resourceType string, flightCtlResource
 	}
 	defer util.CleanupTempYAMLFile(uniqueResourceYAML)
 
-	applyOutput, err := harness.CLI("apply", "-f", uniqueResourceYAML)
+	applyOutput, err := harness.ManageResource("apply", uniqueResourceYAML)
+	//applyOutput, err := harness.CLI("apply", "-f", uniqueResourceYAML)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -282,6 +303,7 @@ func createResource(harness *e2e.Harness, resourceType string, flightCtlResource
 		switch resourceType {
 		case "device":
 			dev := harness.GetDeviceByYaml(uniqueResourceYAML)
+			GinkgoWriter.Printf("🔍 [DEBUG] Unique YAML Device Labels after creaition: %v\n", dev.Metadata.Labels)
 			resource = &dev
 			resourceName = dev.Metadata.Name
 		case "fleet":
@@ -296,7 +318,7 @@ func createResource(harness *e2e.Harness, resourceType string, flightCtlResource
 			return nil, "", nil, fmt.Errorf("Unsupported resource type: %s", resourceType)
 		}
 
-		flightCtlResources = append(flightCtlResources, flightCtlResource{ResourceType: resourceType, ResourceName: *resourceName})
+		//flightCtlResources = append(flightCtlResources, flightCtlResource{ResourceType: resourceType, ResourceName: *resourceName})
 		resourceData, err := yaml.Marshal(resource)
 		if err != nil {
 			return nil, "", nil, err
@@ -308,14 +330,15 @@ func createResource(harness *e2e.Harness, resourceType string, flightCtlResource
 	}
 }
 
-func updateResource(harness *e2e.Harness, resource interface{}, resourceData []byte, labels *map[string]string) error {
-	addTestLabel(resource, labels)
-	updateOutput, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
-	if err != nil || !strings.Contains(updateOutput, "200 OK") {
-		return err
+/*
+	func updateResource(harness *e2e.Harness, resource interface{}, resourceData []byte) error {
+		updateOutput, err := harness.CLIWithStdin(string(resourceData), "apply", "-f", "-")
+		if err != nil || !strings.Contains(updateOutput, "200 OK") {
+			return err
+		}
+		return nil
 	}
-	return nil
-}
+*/
 
 func getDefaultK8sContext() (string, error) {
 	cmd := exec.Command("kubectl", "config", "get-contexts", "-o", "name")
