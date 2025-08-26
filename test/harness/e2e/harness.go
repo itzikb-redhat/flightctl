@@ -1446,6 +1446,36 @@ func (h *Harness) addTestLabelToResource(metadata *v1alpha1.ObjectMeta) {
 	(*metadata.Labels)["test-id"] = testID
 }
 
+func (h *Harness) AddLabelsToYAML(yamlContent string, addLabels map[string]string) (string, error) {
+	// Parse the YAML document
+	var resource map[string]interface{}
+	GinkgoWriter.Printf("🔍 [DEBUG] YAML Content: %s\n", yamlContent)
+	if err := yaml.Unmarshal([]byte(yamlContent), &resource); err != nil {
+		return "", fmt.Errorf("failed to parse yaml document: %w", err)
+	}
+
+	// Add labels to metadata
+	if metadata, ok := resource["metadata"].(map[string]interface{}); ok {
+		if labels, ok := metadata["labels"].(map[string]interface{}); ok {
+			for key, value := range addLabels {
+				labels[addLabels[key]] = value
+			}
+		} else {
+			metadata["labels"] = addLabels
+		}
+	} else {
+		resource["metadata"] = map[string]interface{}{"labels": addLabels}
+	}
+
+	// Marshal back to YAML
+	modifiedDoc, err := yaml.Marshal(resource)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal modified yaml: %w", err)
+	}
+	GinkgoWriter.Printf("🔍 [DEBUG] Modified YAML: %s\n", string(modifiedDoc))
+	return string(modifiedDoc), nil
+}
+
 func (h *Harness) addTestLabelToEnrollmentApprovalRequest(approval *v1alpha1.EnrollmentRequestApproval) {
 	testID := h.GetTestIDFromContext()
 
