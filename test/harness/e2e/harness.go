@@ -1446,10 +1446,10 @@ func (h *Harness) addTestLabelToResource(metadata *v1alpha1.ObjectMeta) {
 	(*metadata.Labels)["test-id"] = testID
 }
 
+// TODO: Modify addTestLabelsToYAML to include other labels and remove addLabelsToYAML
 func (h *Harness) AddLabelsToYAML(yamlContent string, addLabels map[string]string) (string, error) {
 	// Parse the YAML document
 	var resource map[string]interface{}
-	GinkgoWriter.Printf("🔍 [DEBUG] YAML Content: %s\n", yamlContent)
 	if err := yaml.Unmarshal([]byte(yamlContent), &resource); err != nil {
 		return "", fmt.Errorf("failed to parse yaml document: %w", err)
 	}
@@ -1458,7 +1458,7 @@ func (h *Harness) AddLabelsToYAML(yamlContent string, addLabels map[string]strin
 	if metadata, ok := resource["metadata"].(map[string]interface{}); ok {
 		if labels, ok := metadata["labels"].(map[string]interface{}); ok {
 			for key, value := range addLabels {
-				labels[addLabels[key]] = value
+				labels[key] = value
 			}
 		} else {
 			metadata["labels"] = addLabels
