@@ -16,6 +16,12 @@ const (
 	nonAdminUser         = "demouser1"
 	adminRoleName        = "rbac-test-admin-role"
 	adminRoleBindingName = "rbac-test-admin-role-binding"
+	OperationCreate      = "create"
+	OperationUpdate      = "update"
+	OperationGet         = "get"
+	OperationList        = "list"
+	OperationDelete      = "delete"
+	OperationAll         = "all"
 )
 
 var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), func() {
@@ -33,6 +39,7 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 		adminRoleBindingName,
 	}
 	adminTestLabels := &map[string]string{"test": "rbac-admin"}
+	userTestLabels := &map[string]string{"test": "rbac-user"}
 
 	BeforeEach(func() {
 		var err error
@@ -53,7 +60,7 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 		harness.CleanupRoles(roles, roleBindings, suiteCtx, flightCtlNs)
 	})
 
-	Context("FlightCtl Admin Role", func() {
+	Context("FlightCtl user", func() {
 		adminRole := &rbacv1.Role{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      adminRoleName,
@@ -85,48 +92,26 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			},
 		}
 
-		It("should have full access to all resources and operations", Label("sanity", "83842"), func() {
+		It("should have access full access with with an admin role", Label("sanity", "83842"), func() {
+			By("Login to the cluster as a user without a role")
+			err := login.LoginAsNonAdmin(harness, nonAdminUser, nonAdminUser, defaultK8sContext, k8sApiEndpoint)
+			Expect(err).ToNot(HaveOccurred())
+
+			By("Testing that operations should fail without a role")
+			operations := []string{OperationCreate, OperationList}
+			testResourceOperations(suiteCtx, harness, []string{"device", "fleet", "repository"}, false, userTestLabels, flightCtlNs, operations)
+			testReadOnlyResourceOperations(harness, []string{"enrollmentrequests", "events"}, false)
+
 			By("Creating an admin role and a role binding")
 			createdAdminRole, err := harness.CreateRole(suiteCtx, harness.Cluster, flightCtlNs, adminRole)
 			Expect(err).ToNot(HaveOccurred())
 			createdAdminRoleBinding, err := harness.CreateRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, adminRoleBinding)
 			Expect(err).ToNot(HaveOccurred())
 
-			By("Login to the cluster as a user without a role")
-			err = login.LoginAsNonAdmin(harness, nonAdminUser, nonAdminUser, defaultK8sContext, k8sApiEndpoint)
-			Expect(err).ToNot(HaveOccurred())
-
-			for _, resourceType := range []string{"device", "fleet", "repository"} {
-				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
-				By(fmt.Sprintf("Testing creating a %s", resourceType))
-				resourceName, resourceData, err := harness.CreateResource(resourceType)
-				Expect(err).ToNot(HaveOccurred())
-
-				By(fmt.Sprintf("Testing updating a %s", resourceType))
-				updatedResourceData, err := harness.AddLabelsToYAML(string(resourceData), *adminTestLabels)
-				Expect(err).ToNot(HaveOccurred())
-				_, err = harness.CLIWithStdin(updatedResourceData, "apply", "-f", "-")
-				Expect(err).ToNot(HaveOccurred())
-
-				By(fmt.Sprintf("Testing getting a specific %s", resourceType))
-				_, err = harness.GetResourcesByName(resourceType, resourceName)
-				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to get specific %s", resourceType))
-
-				By(fmt.Sprintf("Testing listing %s", resourceType))
-				_, err = harness.GetResourcesByName(resourceType)
-				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
-
-				By(fmt.Sprintf("Testing deleting a %s", resourceType))
-				_, err = harness.CLI("delete", resourceType, resourceName)
-				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to delete %s", resourceType))
-			}
-
-			for _, resourceType := range []string{"enrollmentrequests", "events"} {
-				By(fmt.Sprintf("Testing %s operations - admin should have full access", resourceType))
-				By(fmt.Sprintf("Testing listing %s", resourceType))
-				_, err = harness.GetResourcesByName(resourceType)
-				Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
-			}
+			By("Testing that operations should succeed with admin role")
+			operations = []string{OperationAll}
+			testResourceOperations(suiteCtx, harness, []string{"device", "fleet", "repository"}, true, adminTestLabels, flightCtlNs, operations)
+			testReadOnlyResourceOperations(harness, []string{"enrollmentrequests", "events"}, true)
 
 			By("Deleting the admin role and role binding")
 			harness.ChangeK8sContext(defaultK8sContext)
@@ -135,9 +120,100 @@ var _ = Describe("RBAC Authorization Tests", Label("rbac", "authorization"), fun
 			err = harness.DeleteRoleBinding(suiteCtx, harness.Cluster, flightCtlNs, createdAdminRoleBinding.Name)
 			Expect(err).ToNot(HaveOccurred(), "Admin should be able to delete role binding")
 
-			By("Testing listing repositories without a role - should not be able to list")
-			_, err = harness.GetResourcesByName("repositories")
-			Expect(err).To(HaveOccurred(), "A user without a role should not be able to list repositories")
 		})
 	})
 })
+
+// testResourceOperations tests all CRUD operations for the given resource types
+// shouldSucceed determines whether the operations are expected to succeed or fail
+func testResourceOperations(
+	ctx context.Context,
+	harness *e2e.Harness,
+	resourceTypes []string,
+	shouldSucceed bool,
+	testLabels *map[string]string,
+	namespace string,
+	operations []string,
+) {
+	for _, resourceType := range resourceTypes {
+		By(fmt.Sprintf("Testing %s operations - should %s", resourceType, map[bool]string{true: "succeed", false: "fail"}[shouldSucceed]))
+
+		// Check if OperationAll is in the operations list
+		operationsToExecute := operations
+		for _, op := range operations {
+			if op == OperationAll {
+				operationsToExecute = []string{OperationCreate, OperationUpdate, OperationGet, OperationList, OperationDelete}
+				break
+			}
+		}
+
+		// Execute operations in the order they appear in operationsToExecute
+		var resourceName string
+		var resourceData []byte
+		var err error
+
+		for _, operation := range operationsToExecute {
+			switch operation {
+			case OperationCreate:
+				By(fmt.Sprintf("Testing creating a %s", resourceType))
+				resourceName, resourceData, err = harness.CreateResource(resourceType)
+				if shouldSucceed {
+					Expect(err).ToNot(HaveOccurred())
+				} else {
+					Expect(err).To(HaveOccurred(), fmt.Sprintf("Creating %s should fail", resourceType))
+				}
+			case OperationUpdate:
+				By(fmt.Sprintf("Testing updating a %s", resourceType))
+				updatedResourceData, err := harness.AddLabelsToYAML(string(resourceData), *testLabels)
+				if shouldSucceed {
+					Expect(err).ToNot(HaveOccurred())
+					_, err = harness.CLIWithStdin(updatedResourceData, "apply", "-f", "-")
+					Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Update should succeed for %s", resourceType))
+				} else {
+					Expect(err).To(HaveOccurred(), fmt.Sprintf("Updating %s should fail", resourceType))
+				}
+
+			case OperationGet:
+				By(fmt.Sprintf("Testing getting a specific %s", resourceType))
+				_, err = harness.GetResourcesByName(resourceType, resourceName)
+				if shouldSucceed {
+					Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Getting specific %s should succeed", resourceType))
+				} else {
+					Expect(err).To(HaveOccurred(), fmt.Sprintf("Getting specific %s should fail", resourceType))
+				}
+			case OperationList:
+				By(fmt.Sprintf("Testing listing %s", resourceType))
+				_, err = harness.GetResourcesByName(resourceType)
+				if shouldSucceed {
+					Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Listing %s should succeed", resourceType))
+				} else {
+					Expect(err).To(HaveOccurred(), fmt.Sprintf("Listing %s should fail", resourceType))
+				}
+			case OperationDelete:
+				By(fmt.Sprintf("Testing deleting a %s", resourceType))
+				_, err = harness.CLI("delete", resourceType, resourceName)
+				if shouldSucceed {
+					Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Deleting %s should succeed", resourceType))
+				} else {
+					Expect(err).To(HaveOccurred(), fmt.Sprintf("Deleting %s should fail", resourceType))
+				}
+			}
+		}
+	}
+}
+
+// testReadOnlyResourceOperations tests read-only operations for the given resource types
+// for the given resource types
+// shouldSucceed determines whether the operations are expected to succeed or fail
+func testReadOnlyResourceOperations(harness *e2e.Harness, resourceTypes []string, shouldSucceed bool) {
+	for _, resourceType := range resourceTypes {
+		By(fmt.Sprintf("Testing %s operations - should %s", resourceType, map[bool]string{true: "succeed", false: "fail"}[shouldSucceed]))
+		By(fmt.Sprintf("Testing listing %s", resourceType))
+		_, err := harness.GetResourcesByName(resourceType)
+		if shouldSucceed {
+			Expect(err).ToNot(HaveOccurred(), fmt.Sprintf("Admin should be able to list %s", resourceType))
+		} else {
+			Expect(err).To(HaveOccurred(), fmt.Sprintf("Listing %s should fail", resourceType))
+		}
+	}
+}
