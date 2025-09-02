@@ -25,6 +25,31 @@ func (h *Harness) CreateRole(ctx context.Context, kubernetesClient kubernetes.In
 	return role, err
 }
 
+func (h *Harness) CreateClusterRole(ctx context.Context, kubernetesClient kubernetes.Interface, clusterRole *rbacv1.ClusterRole) (*rbacv1.ClusterRole, error) {
+	if ctx == nil {
+		return nil, errors.New("context cannot be nil")
+	}
+	if clusterRole == nil {
+		return nil, errors.New("clusterRole cannot be nil")
+	}
+
+	clusterRole, err := kubernetesClient.RbacV1().ClusterRoles().Create(ctx, clusterRole, metav1.CreateOptions{})
+	return clusterRole, err
+}
+
+func (h *Harness) CreateClusterRoleBinding(ctx context.Context, kubernetesClient kubernetes.Interface, clusterRoleBinding *rbacv1.ClusterRoleBinding) (*rbacv1.ClusterRoleBinding, error) {
+
+	if ctx == nil {
+		return nil, errors.New("context cannot be nil")
+	}
+	if clusterRoleBinding == nil {
+		return nil, errors.New("clusterRoleBinding cannot be nil")
+	}
+
+	clusterRoleBinding, err := kubernetesClient.RbacV1().ClusterRoleBindings().Create(ctx, clusterRoleBinding, metav1.CreateOptions{})
+	return clusterRoleBinding, err
+}
+
 func (h *Harness) CreateRoleBinding(ctx context.Context, kubernetesClient kubernetes.Interface, flightCtlNs string, roleBinding *rbacv1.RoleBinding) (*rbacv1.RoleBinding, error) {
 	if ctx == nil {
 		return nil, errors.New("context cannot be nil")
@@ -39,9 +64,9 @@ func (h *Harness) CreateRoleBinding(ctx context.Context, kubernetesClient kubern
 	return roleBinding, err
 }
 
-func (h *Harness) CleanupRoles(roles []string, roleBindings []string, suiteCtx context.Context, flightCtlNs string) {
+func (h *Harness) CleanupRoles(ctx context.Context, kubernetesClient kubernetes.Interface, roles []string, roleBindings []string, flightCtlNs string) {
 	for _, role := range roles {
-		err := h.DeleteRole(suiteCtx, h.Cluster, flightCtlNs, role)
+		err := h.DeleteRole(ctx, h.Cluster, flightCtlNs, role)
 		if err != nil {
 			logrus.Errorf("Failed to delete role %s: %v", role, err)
 		} else {
@@ -49,7 +74,7 @@ func (h *Harness) CleanupRoles(roles []string, roleBindings []string, suiteCtx c
 		}
 	}
 	for _, roleBinding := range roleBindings {
-		err := h.DeleteRoleBinding(suiteCtx, h.Cluster, flightCtlNs, roleBinding)
+		err := h.DeleteRoleBinding(ctx, h.Cluster, flightCtlNs, roleBinding)
 		if err != nil {
 			logrus.Errorf("Failed to delete role binding %s: %v", roleBinding, err)
 		} else {
@@ -58,10 +83,27 @@ func (h *Harness) CleanupRoles(roles []string, roleBindings []string, suiteCtx c
 	}
 }
 
-func (h *Harness) DeleteRoleBinding(ctx context.Context, client kubernetes.Interface, namespace string, roleBindingName string) error {
-	return client.RbacV1().RoleBindings(namespace).Delete(ctx, roleBindingName, metav1.DeleteOptions{})
+func (h *Harness) CleanupClusterRoles(ctx context.Context, kubernetesClient kubernetes.Interface, clusterRoles []string, clusterRoleBindings []string) {
+	for _, clusterRole := range clusterRoles {
+		err := h.DeleteClusterRole(ctx, kubernetesClient, clusterRole)
+		if err != nil {
+			logrus.Errorf("Failed to delete cluster role %s: %v", clusterRole, err)
+		}
+	}
 }
 
 func (h *Harness) DeleteRole(ctx context.Context, client kubernetes.Interface, namespace string, roleName string) error {
 	return client.RbacV1().Roles(namespace).Delete(ctx, roleName, metav1.DeleteOptions{})
+}
+
+func (h *Harness) DeleteClusterRole(ctx context.Context, client kubernetes.Interface, clusterRoleName string) error {
+	return client.RbacV1().ClusterRoles().Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
+}
+
+func (h *Harness) DeleteRoleBinding(ctx context.Context, client kubernetes.Interface, namespace string, roleBindingName string) error {
+	return client.RbacV1().RoleBindings(namespace).Delete(ctx, roleBindingName, metav1.DeleteOptions{})
+}
+
+func (h *Harness) DeleteClusterRoleBinding(ctx context.Context, client kubernetes.Interface, clusterRoleBindingName string) error {
+	return client.RbacV1().ClusterRoleBindings().Delete(ctx, clusterRoleBindingName, metav1.DeleteOptions{})
 }

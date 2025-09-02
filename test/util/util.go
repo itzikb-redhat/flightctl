@@ -107,7 +107,7 @@ func (t *testProvider) Consume(ctx context.Context, handler queues.ConsumeHandle
 }
 
 func IsAcmInstalled() (bool, error) {
-	if BinaryExistsOnPath("oc") {
+	if !BinaryExistsOnPath("oc") {
 		return false, fmt.Errorf("oc not found on PATH")
 	}
 	cmd := exec.Command("oc", "get", "multiclusterhub", "-A")
