@@ -86,6 +86,8 @@ const POLLING = "250ms"
 const POLLINGLONG = "1s"
 const TIMEOUT = "5m"
 const LONGTIMEOUT = "10m"
+const LONG_TIMEOUT_DURATION_MINS = 10
+const SHORT_TIMEOUT_DURATION_MINS = 5
 
 // Operation constants for RBAC testing
 const (

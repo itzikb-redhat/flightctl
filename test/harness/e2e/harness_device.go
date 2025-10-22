@@ -67,10 +67,26 @@ func (h *Harness) GetDeviceWithUpdateStatus(enrollmentID string) (v1alpha1.Devic
 func (h *Harness) UpdateDeviceWithRetries(deviceId string, updateFunction func(*v1alpha1.Device)) error {
 	// this needs to be changed so that we don't use Eventually as our polling mechanism so that we can simply return
 	// the underlying error if one exists
-	updateResourceWithRetries(func() error {
-		return h.UpdateDevice(deviceId, updateFunction)
-	})
-	return nil
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	deadline := time.Now().Add(SHORT_TIMEOUT_DURATION_MINS * time.Minute)
+
+	for {
+		err := h.UpdateDevice(deviceId, updateFunction)
+		if err == nil {
+			return nil
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("update failed after %v: %w", SHORT_TIMEOUT_DURATION_MINS*time.Minute, err)
+		}
+
+		select {
+		case <-ticker.C:
+			continue
+		}
+	}
 }
 
 func (h *Harness) UpdateDevice(deviceId string, updateFunction func(*v1alpha1.Device)) error {
@@ -342,19 +358,41 @@ func (h *Harness) WaitForDeviceNewGeneration(deviceId string, newGeneration int6
 
 	// Wait for the device to pickup the new config and report measurements on device status.
 	logrus.Infof("Waiting for the device to pick the config")
-	h.WaitForDeviceContents(deviceId, fmt.Sprintf("Waiting fot the device generation %d", newGeneration),
-		func(device *v1alpha1.Device) bool {
-			for _, condition := range device.Status.Conditions {
-				if condition.Type == "Updating" && condition.Reason == "Updated" && condition.Status == "False" &&
-					device.Status.Updated.Status == v1alpha1.DeviceUpdatedStatusUpToDate &&
-					newGeneration == *device.Metadata.Generation {
-					return true
-				}
-			}
-			return false
-		}, LONGTIMEOUT)
+	timeout := 10 * time.Minute
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
-	return nil
+	deadline := time.Now().Add(LONG_TIMEOUT_DURATION_MINS * time.Minute)
+
+	for {
+		device, err := h.fetchDeviceContents(deviceId)
+		if err != nil {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("failed to get device after %v: %w", timeout, err)
+			}
+			select {
+			case <-ticker.C:
+				continue // Retry
+			}
+		}
+
+		for _, condition := range device.Status.Conditions {
+			if condition.Type == "Updating" && condition.Reason == "Updated" && condition.Status == "False" &&
+				device.Status.Updated.Status == v1alpha1.DeviceUpdatedStatusUpToDate &&
+				newGeneration == *device.Metadata.Generation {
+				return nil // Success
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("generation %d not reached after %v, current: %d", newGeneration, timeout, *device.Metadata.Generation)
+		}
+
+		select {
+		case <-ticker.C:
+			continue // Retry
+		}
+	}
 }
 
 // GetDeviceConfig is a generic helper function to retrieve device configurations

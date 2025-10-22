@@ -239,7 +239,7 @@ var _ = Describe("VM Agent behavior", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			err = harness.WaitForDeviceNewGeneration(deviceId, nextGeneration)
-			Expect(err).ToNot(HaveOccurred())
+			Expect(err).To(HaveOccurred())
 
 			harness.WaitForDeviceContents(deviceId, fmt.Sprintf("Failed to update to renderedVersion: %s. Error", strconv.Itoa(newRenderedVersion)),
 				func(device *v1alpha1.Device) bool {
