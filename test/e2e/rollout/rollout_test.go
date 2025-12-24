@@ -8,7 +8,6 @@ import (
 
 	api "github.com/flightctl/flightctl/api/v1beta1"
 	"github.com/flightctl/flightctl/test/harness/e2e"
-	"github.com/flightctl/flightctl/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
@@ -165,7 +164,7 @@ var _ = Describe("Rollout Policies", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			By("Checking Disruption Budget by Grouping Devices")
-			err = tc.updateAppVersion(util.SleepAppTags.V2)
+			err = tc.updateAppVersion("v2")
 			Expect(err).ToNot(HaveOccurred())
 
 			deviceSpec, err = tc.createDeviceSpec()
@@ -270,7 +269,7 @@ var _ = Describe("Rollout Policies", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// update Name of app version in device spec to trigger a new rollout
-			err = tc.updateAppVersion(util.SleepAppTags.V2)
+			err = tc.updateAppVersion("v2")
 			Expect(err).ToNot(HaveOccurred())
 
 			deviceSpec, err = tc.createDeviceSpec()
@@ -329,7 +328,7 @@ var _ = Describe("Rollout Policies", func() {
 			tc.harness.WaitForBatchStart(fleetName, 1)
 
 			By("Updating the fleet template version during rollout")
-			err = tc.updateAppVersion(util.SleepAppTags.V2)
+			err = tc.updateAppVersion("v2")
 			Expect(err).ToNot(HaveOccurred())
 
 			deviceSpec, err = tc.createDeviceSpec()
@@ -537,7 +536,8 @@ func setupTestContext(ctx context.Context) *TestContext {
 	// Get harness directly - no shared package-level variable
 	harness := e2e.GetWorkerHarness()
 
-	sleepAppImage := util.NewSleepAppImageReference(util.SleepAppTags.V1).String()
+	extIP := harness.RegistryEndpoint()
+	sleepAppImage := fmt.Sprintf("%s/sleep-app:v1", extIP)
 
 	applicationConfig := api.ImageApplicationProviderSpec{
 		Image: sleepAppImage,
@@ -624,7 +624,7 @@ func (tc *TestContext) createDeviceSpec() (api.DeviceSpec, error) {
 
 func (tc *TestContext) updateAppVersion(version string) error {
 	tc.applicationSpec.Name = lo.ToPtr(fmt.Sprintf("sleepapp-%s", version))
-	tc.applicationConfig.Image = util.NewSleepAppImageReference(version).String()
+	tc.applicationConfig.Image = fmt.Sprintf("%s/sleep-app:%s", tc.harness.RegistryEndpoint(), version)
 	return tc.applicationSpec.FromImageApplicationProviderSpec(tc.applicationConfig)
 }
 

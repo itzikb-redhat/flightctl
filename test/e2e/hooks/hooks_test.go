@@ -6,7 +6,6 @@ import (
 
 	"github.com/flightctl/flightctl/api/v1beta1"
 	"github.com/flightctl/flightctl/test/harness/e2e"
-	"github.com/flightctl/flightctl/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -23,7 +22,7 @@ var _ = Describe("Device lifecycles and embedded hooks tests", func() {
 	})
 
 	Context("hooks", func() {
-		It(`Verifies that lifecycles hooks are triggered after the device and agent events`, Label("78753", "sanity", "slow"), func() {
+		It(`Verifies that lifecycles hooks are triggered after the device and agent events`, Label("78753", "sanity"), func() {
 			// Get harness directly - no shared package-level variable
 			harness := e2e.GetWorkerHarness()
 
@@ -34,7 +33,7 @@ var _ = Describe("Device lifecycles and embedded hooks tests", func() {
 			nextRenderedVersion, err := harness.PrepareNextDeviceVersion(deviceId)
 			Expect(err).ToNot(HaveOccurred())
 
-			deviceImage := util.NewDeviceImageReference(util.DeviceTags.V6).String()
+			deviceImage := fmt.Sprintf("%s/flightctl-device:v6", harness.RegistryEndpoint())
 
 			var osImageSpec = v1beta1.DeviceOsSpec{
 				Image: deviceImage,
@@ -139,7 +138,7 @@ var _ = Describe("Device lifecycles and embedded hooks tests", func() {
 			By("Check pre/after update and pre/after reboot hooks from inline config works")
 			nextRenderedVersion, err = harness.PrepareNextDeviceVersion(deviceId)
 			Expect(err).ToNot(HaveOccurred())
-			deviceImage = util.NewDeviceImageReference(util.DeviceTags.Base).String()
+			deviceImage = fmt.Sprintf("%s/flightctl-device:base", harness.RegistryEndpoint())
 
 			osImageSpec.Image = deviceImage
 			err = inlineConfigProviderSpec.FromInlineConfigProviderSpec(inlineConfigValidLifecycle)

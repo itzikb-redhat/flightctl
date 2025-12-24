@@ -34,7 +34,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 			harness := e2e.GetWorkerHarness()
 
 			By("Verifying update to agent  with requested image")
-			device, newImageReference, err := harness.WaitForBootstrapAndUpdateToVersion(deviceId, util.DeviceTags.V2)
+			device, newImageReference, err := harness.WaitForBootstrapAndUpdateToVersion(deviceId, ":v2")
 			Expect(err).ToNot(HaveOccurred())
 
 			currentImage := device.Status.Os.Image
@@ -76,7 +76,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 
 			By("Verifying update to agent  with embedded application")
 
-			device, newImageReference, err := harness.WaitForBootstrapAndUpdateToVersion(deviceId, util.DeviceTags.V4)
+			device, newImageReference, err := harness.WaitForBootstrapAndUpdateToVersion(deviceId, ":v4")
 			Expect(err).ToNot(HaveOccurred())
 
 			currentImage := device.Status.Os.Image
@@ -112,7 +112,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 			Eventually(harness.GetDeviceWithStatusSummary, LONGTIMEOUT, POLLING).WithArguments(
 				deviceId).Should(Equal(v1beta1.DeviceSummaryStatusType("Online")))
 
-			GinkgoWriter.Printf("Device updated to new image %s 🎉\n", util.NewDeviceImageReference(util.DeviceTags.V4).String())
+			GinkgoWriter.Printf("Device updated to new image %s 🎉\n", "flightctl-device:v4")
 			GinkgoWriter.Printf("We expect containers with sleep infinity process to be present but not running\n")
 			stdout, err := harness.VM.RunSSH([]string{"sudo", "podman", "ps"}, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -120,7 +120,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 
 			GinkgoWriter.Printf("We expect podman containers with sleep infinity process to be present but not running 👌\n")
 
-			device, newImageReference, err = harness.WaitForBootstrapAndUpdateToVersion(deviceId, util.DeviceTags.Base)
+			device, newImageReference, err = harness.WaitForBootstrapAndUpdateToVersion(deviceId, ":base")
 			Expect(err).ToNot(HaveOccurred())
 
 			currentImage = device.Status.Os.Image
@@ -156,7 +156,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 			Eventually(harness.GetDeviceWithStatusSummary, LONGTIMEOUT, POLLING).WithArguments(
 				deviceId).Should(Equal(v1beta1.DeviceSummaryStatusType("Online")))
 
-			GinkgoWriter.Printf("Device updated to new image %s 🎉\n", util.NewDeviceImageReference(util.DeviceTags.Base).String())
+			GinkgoWriter.Printf("Device updated to new image %s 🎉\n", "flightctl-device:base")
 			Expect(device.Spec.Applications).To(BeNil())
 			GinkgoWriter.Printf("Application demo_embedded_app is not present in new image 🌞\n")
 
@@ -237,7 +237,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 			Expect(err).NotTo(HaveOccurred())
 			initialImage := dev.Status.Os.Image
 			// The v8 image should contain a bad compose file
-			_, _, err = harness.WaitForBootstrapAndUpdateToVersion(deviceId, util.DeviceTags.V8)
+			_, _, err = harness.WaitForBootstrapAndUpdateToVersion(deviceId, ":v8")
 			Expect(err).ToNot(HaveOccurred())
 
 			harness.WaitForDeviceContents(deviceId, "device image should be updated to the new image", func(device *v1beta1.Device) bool {
@@ -285,7 +285,7 @@ var _ = Describe("VM Agent behavior during updates", func() {
 				}, TIMEOUT)
 			*/
 		})
-		It("Should respect the spec's update schedule", Label("79220", "sanity", "slow"), func() {
+		It("Should respect the spec's update schedule", Label("79220", "sanity"), func() {
 			// Get harness directly - no shared package-level variable
 			harness := e2e.GetWorkerHarness()
 

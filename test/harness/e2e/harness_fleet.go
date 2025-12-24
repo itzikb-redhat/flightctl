@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/flightctl/flightctl/api/v1beta1"
-	"github.com/flightctl/flightctl/test/util"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
@@ -19,7 +18,7 @@ func (h *Harness) CreateFleetDeviceSpec(deviceImageTag string, additionalConfigs
 	// Set Os.Image only if deviceImageTag is provided
 	if deviceImageTag != "" {
 		deviceSpec.Os = &v1beta1.DeviceOsSpec{
-			Image: util.NewDeviceImageReference(deviceImageTag).String(),
+			Image: fmt.Sprintf("%s/flightctl-device:%s", h.RegistryEndpoint(), deviceImageTag),
 		}
 	}
 
