@@ -1099,8 +1099,13 @@ const imageBuilderWorkerLabelSelector = "flightctl.service=flightctl-imagebuilde
 // getImageBuilderWorkerPods returns the imagebuilder-worker pods and their namespace.
 // If no pods are found, it returns an empty list and the detected namespace.
 func (h *Harness) getImageBuilderWorkerPods() ([]corev1.Pod, string, error) {
+	cluster, err := h.clusterClient()
+	if err != nil {
+		return nil, "", err
+	}
+
 	// Try to find pods across all namespaces first
-	pods, err := h.Cluster.CoreV1().Pods("").List(h.Context, metav1.ListOptions{
+	pods, err := cluster.CoreV1().Pods("").List(h.Context, metav1.ListOptions{
 		LabelSelector: imageBuilderWorkerLabelSelector,
 	})
 	if err != nil {
@@ -1114,7 +1119,7 @@ func (h *Harness) getImageBuilderWorkerPods() ([]corev1.Pod, string, error) {
 
 	// No pods found, try to detect namespace from deployment
 	for _, ns := range []string{"flightctl-internal", "flightctl", "default"} {
-		_, err := h.Cluster.AppsV1().Deployments(ns).Get(h.Context, "flightctl-imagebuilder-worker", metav1.GetOptions{})
+		_, err := cluster.AppsV1().Deployments(ns).Get(h.Context, "flightctl-imagebuilder-worker", metav1.GetOptions{})
 		if err == nil {
 			return nil, ns, nil
 		}
@@ -1145,8 +1150,13 @@ func (h *Harness) KillImageBuilderWorkerPods() error {
 		GracePeriodSeconds: &gracePeriod,
 	}
 
+	cluster, err := h.clusterClient()
+	if err != nil {
+		return err
+	}
+
 	for _, pod := range pods {
-		err := h.Cluster.CoreV1().Pods(namespace).Delete(h.Context, pod.Name, deleteOptions)
+		err := cluster.CoreV1().Pods(namespace).Delete(h.Context, pod.Name, deleteOptions)
 		if err != nil {
 			GinkgoWriter.Printf("Failed to delete pod %s: %v\n", pod.Name, err)
 		} else {
@@ -1165,8 +1175,13 @@ func (h *Harness) getImageBuilderWorkerConfig() (*config.Config, *corev1.ConfigM
 		return nil, nil, err
 	}
 
+	cluster, err := h.clusterClient()
+	if err != nil {
+		return nil, nil, err
+	}
+
 	configMapName := "flightctl-imagebuilder-worker-config"
-	cm, err := h.Cluster.CoreV1().ConfigMaps(namespace).Get(h.Context, configMapName, metav1.GetOptions{})
+	cm, err := cluster.CoreV1().ConfigMaps(namespace).Get(h.Context, configMapName, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get configmap: %w", err)
 	}
@@ -1210,8 +1225,13 @@ func (h *Harness) UpdateImageBuilderWorkerConfig(modifier func(*config.Config)) 
 	GinkgoWriter.Printf("Config AFTER change:\n%s\n", string(updatedConfig))
 
 	// Update the configmap
+	cluster, err := h.clusterClient()
+	if err != nil {
+		return err
+	}
+
 	cm.Data["config.yaml"] = string(updatedConfig)
-	_, err = h.Cluster.CoreV1().ConfigMaps(cm.Namespace).Update(h.Context, cm, metav1.UpdateOptions{})
+	_, err = cluster.CoreV1().ConfigMaps(cm.Namespace).Update(h.Context, cm, metav1.UpdateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to update configmap: %w", err)
 	}

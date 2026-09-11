@@ -49,6 +49,7 @@ import (
 	"bytes"
 	"context"
 	cryptorand "crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -104,9 +105,11 @@ type Harness struct {
 	Client             *apiclient.ClientWithResponses
 	ImageBuilderClient *imagebuilderclient.ClientWithResponses
 	Context            context.Context
-	Cluster            kubernetes.Interface
-	ctxCancel          context.CancelFunc
-	startTime          time.Time
+	// Cluster is nil when kubeconfig cannot be resolved (kind/OpenShift not present),
+	// for example when Flight Control is deployed via quadlets on a remote VM.
+	Cluster   kubernetes.Interface
+	ctxCancel context.CancelFunc
+	startTime time.Time
 
 	VM vm.TestVMInterface
 
@@ -143,6 +146,11 @@ func findTopLevelDir() string { //nolint:unused
 	return ""
 }
 
+// errKubeconfigNotFound is returned when no kubeconfig is set and none of the well-known paths exist.
+// Suites that only talk to the Flight Control API (for example agent e2e against a quadlet deployment)
+// continue without a Kubernetes client.
+var errKubeconfigNotFound = errors.New("kubeconfig not found")
+
 // try to resolve the kube config at a few well known locations
 func resolveKubeConfigPath() (string, error) {
 	if kc, ok := os.LookupEnv("KUBECONFIG"); ok && kc != "" {
@@ -154,7 +162,8 @@ func resolveKubeConfigPath() (string, error) {
 	}
 
 	paths := []string{
-		filepath.Join(home, ".kube", "config"),                                                           // default
+		filepath.Join(home, ".kube", "config"), // default
+		filepath.Join(string(filepath.Separator), "home", "kni", "clusterconfigs", "auth", "kubeconfig"), // qa path used by test.mk
 		filepath.Join(string(filepath.Separator), "home", "kni", "clusterconfigs", "kubeconfig"),         // qa path
 		filepath.Join(string(filepath.Separator), "home", "kni", "auth", "clusterconfigs", "kubeconfig"), // qa path
 	}
@@ -164,7 +173,15 @@ func resolveKubeConfigPath() (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("failed to find kubeconfig file in the paths: %v", paths)
+	return "", fmt.Errorf("%w in the paths: %v", errKubeconfigNotFound, paths)
+}
+
+// clusterClient returns the Kubernetes client or an error when this harness has no cluster.
+func (h *Harness) clusterClient() (kubernetes.Interface, error) {
+	if h == nil || h.Cluster == nil {
+		return nil, fmt.Errorf("kubernetes client is not available because kubeconfig was not found; this operation requires a Kubernetes or OpenShift deployment")
+	}
+	return h.Cluster, nil
 }
 
 // build a k8s interface so that tests can interact with it directly from Go rather than
@@ -1507,8 +1524,12 @@ func newTestHarnessBase(ctx context.Context) (*Harness, error) {
 
 	k8sCluster, err := kubernetesClient()
 	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to get kubernetes cluster: %w", err)
+		if !errors.Is(err, errKubeconfigNotFound) {
+			cancel()
+			return nil, fmt.Errorf("failed to get kubernetes cluster: %w", err)
+		}
+		logrus.Infof("No kubeconfig found; continuing without Kubernetes client: %v", err)
+		k8sCluster = nil
 	}
 
 	// Initialize git repository management

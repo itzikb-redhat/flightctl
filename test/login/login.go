@@ -77,6 +77,8 @@ func isLoginSuccessful(cmdOutput string) bool {
 }
 
 func getActiveNamespaces(harness *e2e.Harness) []string {
+	Expect(harness).NotTo(BeNil())
+	Expect(harness.Cluster).NotTo(BeNil(), "kubernetes client is required to resolve Flight Control namespaces")
 	res, err := harness.Cluster.CoreV1().Namespaces().List(harness.Context, metav1.ListOptions{FieldSelector: "status.phase=Active"})
 	Expect(err).ToNot(HaveOccurred(), "error listing namespaces")
 	namespaces := make([]string, 0, len(res.Items))

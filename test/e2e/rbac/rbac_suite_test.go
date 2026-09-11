@@ -23,6 +23,10 @@ var _ = BeforeSuite(func() {
 	_, _, err := e2e.SetupWorkerHarness()
 	Expect(err).ToNot(HaveOccurred())
 
+	if e2e.GetWorkerHarness().Cluster == nil {
+		Skip("Skipping RBAC suite because kubeconfig is not available")
+	}
+
 	// Check if ACM is installed before running any tests
 	isAcmInstalled, _, err := util.IsAcmInstalled()
 
