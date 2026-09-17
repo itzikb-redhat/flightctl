@@ -19,6 +19,14 @@ write_files:
     permissions: '0644'
     content: |
       deny = 0
+  - path: /etc/ssh/sshd_config.d/00-pwauth.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PasswordAuthentication yes
+      KbdInteractiveAuthentication yes
+      GSSAPIAuthentication no
+      UseDNS no
 {{- if .WithServices }}
   - path: /var/www/html/index.html
     content: {{ yamlQuote .IndexHTML }}
@@ -74,7 +82,9 @@ write_files:
       WantedBy=multi-user.target
 {{- end }}
 runcmd:
-  - {{.FaillockCommand}}
+  - {{ yamlQuote .FaillockCommand }}
+  - {{ yamlQuote .ForcePasswordSSHCommand }}
+  - {{ yamlQuote .EnableSSHDCommand }}
 {{- if .WithServices }}
   - systemctl daemon-reload
   - systemctl enable --now hello-http.service

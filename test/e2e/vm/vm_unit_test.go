@@ -131,6 +131,8 @@ func TestConfigDriveCloudUserDataWhenEnablingPasswordSSHItShouldResetFaillock(t 
 	require.Contains(t, got, "deny = 0")
 	require.Contains(t, got, "authselect disable-feature with-faillock")
 	require.Contains(t, got, "faillock --user "+vmCloudUser+" --reset")
+	require.Contains(t, got, "ssh-keygen -A")
+	require.Contains(t, got, "systemctl enable sshd.service")
 	require.NotContains(t, got, "hello-http.service")
 }
 

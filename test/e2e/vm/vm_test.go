@@ -428,7 +428,7 @@ var _ = Describe("VM Applications", Ordered, ContinueOnFailure, func() {
 	It("attaches hostDisk and dataVolume to the VM and removes them cleanly", Label("vm", "90243"), func() {
 		image := getVMImage()
 		setupCloudInit := vmFedoraNoCloudUserDataWithHostVolumeSetup(vmGuestPassword)
-		laterCloudInit := vmFedoraNoCloudUserDataWithPasswordlessSudo(vmGuestPassword)
+		laterCloudInit := e2e.VMFedoraNoCloudUserData(vmGuestPassword)
 		publishPorts := []string{fmt.Sprintf("%d:%d", vmPublishedSSHPort, vmGuestSSHPort)}
 
 		applyVMYAML := func(vmYAML string) {
@@ -638,19 +638,6 @@ func parseLsblkDisks(out string) []string {
 	return disks
 }
 
-func vmFedoraNoCloudUserDataWithPasswordlessSudo(password string) string {
-	return e2e.VMFedoraNoCloudUserDataWith(password, []e2e.VMCloudInitWriteFile{vmGuestSudoersWriteFile()}, nil)
-}
-
-func vmGuestSudoersWriteFile() e2e.VMCloudInitWriteFile {
-	return e2e.VMCloudInitWriteFile{
-		Path:        fmt.Sprintf("/etc/sudoers.d/%s", vmGuestUser),
-		Owner:       "root:root",
-		Permissions: "0440",
-		Content:     fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", vmGuestUser),
-	}
-}
-
 func vmFedoraNoCloudUserDataWithHostVolumeSetup(password string) string {
 	script := fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
@@ -673,7 +660,6 @@ cp /mnt/extradata/used.txt %[5]s
 chmod 0644 %[5]s
 `, vmHostDataGuestDisk, vmExtraDataGuestDisk, vmHostDataHelloFile, vmExtraDataUsedContent, vmExtraDataUsedFile)
 	return e2e.VMFedoraNoCloudUserDataWith(password, []e2e.VMCloudInitWriteFile{
-		vmGuestSudoersWriteFile(),
 		{
 			Path:        vmHostVolumeSetupScriptPath,
 			Owner:       "root:root",
@@ -960,25 +946,29 @@ func encodeConfigDriveUserData(cloudConfig string) string {
 }
 
 type configDriveCloudConfigParams struct {
-	User            string
-	Password        string
-	SSHPublicKey    string
-	FaillockCommand string
-	WithServices    bool
-	IndexHTML       string
-	UDPPort         int
+	User              string
+	Password          string
+	SSHPublicKey      string
+	FaillockCommand         string
+	ForcePasswordSSHCommand string
+	EnableSSHDCommand       string
+	WithServices      bool
+	IndexHTML         string
+	UDPPort           int
 }
 
 func renderConfigDriveCloudUserData(sshPublicKey, password string, withServices bool) string {
 	var buf bytes.Buffer
 	params := configDriveCloudConfigParams{
-		User:            vmCloudUser,
-		Password:        password,
-		SSHPublicKey:    sshPublicKey,
-		FaillockCommand: e2e.VMGuestDisableFaillockCommand(vmCloudUser),
-		WithServices:    withServices,
-		IndexHTML:       configDriveIndexHTMLContent,
-		UDPPort:         vmBPublishedUDPPort,
+		User:              vmCloudUser,
+		Password:          password,
+		SSHPublicKey:      sshPublicKey,
+		FaillockCommand:         e2e.VMGuestDisableFaillockCommand(vmCloudUser),
+		ForcePasswordSSHCommand: e2e.VMGuestForcePasswordSSHCommand(),
+		EnableSSHDCommand:       e2e.VMGuestEnableSSHDCommand(),
+		WithServices:      withServices,
+		IndexHTML:         configDriveIndexHTMLContent,
+		UDPPort:           vmBPublishedUDPPort,
 	}
 	if err := configDriveCloudConfigTemplate.Execute(&buf, params); err != nil {
 		panic("rendering cloud-config-drive: " + err.Error())

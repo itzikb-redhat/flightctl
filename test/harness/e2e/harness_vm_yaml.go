@@ -38,7 +38,7 @@ type vmYAMLParams struct {
 }
 
 // VMCloudInitWriteFile is an extra cloud-init write_files entry merged into
-// VMFedoraNoCloudUserDataWith alongside the default faillock.conf.
+// VMFedoraNoCloudUserDataWith alongside the default faillock and sudoers files.
 type VMCloudInitWriteFile struct {
 	Path        string
 	Owner       string
@@ -47,10 +47,13 @@ type VMCloudInitWriteFile struct {
 }
 
 type fedoraCloudConfigParams struct {
-	Password        string
-	FaillockCommand string
-	ExtraWriteFiles []VMCloudInitWriteFile
-	ExtraRuncmds    []string
+	GuestUser               string
+	Password                string
+	FaillockCommand         string
+	ForcePasswordSSHCommand string
+	EnableSSHDCommand       string
+	ExtraWriteFiles         []VMCloudInitWriteFile
+	ExtraRuncmds            []string
 }
 
 func renderTemplate(tmpl *template.Template, data any) string {
@@ -100,7 +103,23 @@ func VMGuestDisableFaillockCommand(user string) string {
 	return fmt.Sprintf(`bash -lc "authselect disable-feature with-faillock >/dev/null 2>&1 || true; faillock --user %s --reset >/dev/null 2>&1 || true"`, user)
 }
 
-// VMFedoraNoCloudUserData returns cloud-init userData that enables password SSH for the fedora user.
+// VMGuestEnableSSHDCommand generates host keys, then enables sshd.service so a
+// daemon stays running after reboot instead of Fedora's default sshd.socket.
+// Keys must exist first; otherwise sshd exits with "no hostkeys available".
+// --no-block keeps nested-VM cloud-init from stalling several minutes on sshd start.
+func VMGuestEnableSSHDCommand() string {
+	return "ssh-keygen -A; systemctl --no-block mask --now sshd.socket; systemctl unmask sshd.service; systemctl enable sshd.service; systemctl --no-block start sshd.service"
+}
+
+// VMGuestForcePasswordSSHCommand makes sshd offer password auth. Fedora's
+// 50-redhat.conf sets PasswordAuthentication no and OpenSSH uses the first match,
+// so ssh_pwauth alone is not enough; this rewrites that file and reloads sshd.
+func VMGuestForcePasswordSSHCommand() string {
+	return "sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config.d/50-redhat.conf; systemctl reload sshd.service"
+}
+
+// VMFedoraNoCloudUserData returns cloud-init userData that sets the fedora
+// password, passwordless sudo, and a persistent sshd.service.
 func VMFedoraNoCloudUserData(password string) string {
 	return VMFedoraNoCloudUserDataWith(password, nil, nil)
 }
@@ -108,10 +127,13 @@ func VMFedoraNoCloudUserData(password string) string {
 // VMFedoraNoCloudUserDataWith is VMFedoraNoCloudUserData plus extra write_files and runcmd entries.
 func VMFedoraNoCloudUserDataWith(password string, extraWriteFiles []VMCloudInitWriteFile, extraRuncmds []string) string {
 	return renderTemplate(fedoraCloudConfigTemplate, fedoraCloudConfigParams{
-		Password:        password,
-		FaillockCommand: VMGuestDisableFaillockCommand(VMFedoraGuestUser),
-		ExtraWriteFiles: extraWriteFiles,
-		ExtraRuncmds:    extraRuncmds,
+		GuestUser:               VMFedoraGuestUser,
+		Password:                password,
+		FaillockCommand:         VMGuestDisableFaillockCommand(VMFedoraGuestUser),
+		ForcePasswordSSHCommand: VMGuestForcePasswordSSHCommand(),
+		EnableSSHDCommand:       VMGuestEnableSSHDCommand(),
+		ExtraWriteFiles:         extraWriteFiles,
+		ExtraRuncmds:            extraRuncmds,
 	})
 }
 

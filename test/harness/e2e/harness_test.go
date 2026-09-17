@@ -97,6 +97,9 @@ func TestVMFedoraNoCloudUserDataWhenEnablingPasswordSSHItShouldResetFaillock(t *
 		"faillock-deny",
 		"faillock-disable",
 		"faillock-reset",
+		"sudoers",
+		"sshd-pwauth",
+		"enable-sshd",
 	} {
 		var present bool
 		switch field {
@@ -112,6 +115,16 @@ func TestVMFedoraNoCloudUserDataWhenEnablingPasswordSSHItShouldResetFaillock(t *
 			present = strings.Contains(got, "authselect disable-feature with-faillock")
 		case "faillock-reset":
 			present = strings.Contains(got, "faillock --user "+VMFedoraGuestUser+" --reset")
+		case "sudoers":
+			present = strings.Contains(got, "path: /etc/sudoers.d/"+VMFedoraGuestUser) &&
+				strings.Contains(got, VMFedoraGuestUser+" ALL=(ALL) NOPASSWD:ALL")
+		case "sshd-pwauth":
+			present = strings.Contains(got, "path: /etc/ssh/sshd_config.d/00-pwauth.conf") &&
+				strings.Contains(got, "PasswordAuthentication yes")
+		case "enable-sshd":
+			present = strings.Contains(got, "ssh-keygen -A") &&
+				strings.Contains(got, "systemctl enable sshd.service") &&
+				strings.Contains(got, "50-redhat.conf")
 		}
 		if !present {
 			t.Fatalf("cloud-init userData is missing required field %s", field)
@@ -223,14 +236,16 @@ func TestVMYAMLWithHostVolumesWhenPathsAreEmptyItShouldOmitExtraDisks(t *testing
 
 func TestVMFedoraNoCloudUserDataWithWhenExtraFilesAreSetItShouldKeepFaillockAndAppendEntries(t *testing.T) {
 	got := VMFedoraNoCloudUserDataWith(t.Name(), []VMCloudInitWriteFile{{
-		Path:        "/etc/sudoers.d/fedora",
+		Path:        "/usr/local/bin/verify-vm-host-volumes.sh",
 		Owner:       "root:root",
-		Permissions: "0440",
-		Content:     "fedora ALL=(ALL) NOPASSWD:ALL",
+		Permissions: "0755",
+		Content:     "#!/bin/bash\ntrue\n",
 	}}, []string{"/usr/local/bin/verify-vm-host-volumes.sh"})
 	for _, field := range []string{
 		"faillock-conf",
 		"sudoers",
+		"enable-sshd",
+		"setup-script",
 		"setup-script-runcmd",
 	} {
 		var present bool
@@ -238,7 +253,12 @@ func TestVMFedoraNoCloudUserDataWithWhenExtraFilesAreSetItShouldKeepFaillockAndA
 		case "faillock-conf":
 			present = strings.Contains(got, "path: /etc/security/faillock.conf")
 		case "sudoers":
-			present = strings.Contains(got, "path: /etc/sudoers.d/fedora")
+			present = strings.Contains(got, "path: /etc/sudoers.d/"+VMFedoraGuestUser)
+		case "enable-sshd":
+			present = strings.Contains(got, "ssh-keygen -A") &&
+				strings.Contains(got, "systemctl enable sshd.service")
+		case "setup-script":
+			present = strings.Contains(got, "path: /usr/local/bin/verify-vm-host-volumes.sh")
 		case "setup-script-runcmd":
 			present = strings.Contains(got, "/usr/local/bin/verify-vm-host-volumes.sh")
 		}

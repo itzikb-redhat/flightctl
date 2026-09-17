@@ -8,6 +8,19 @@ write_files:
     permissions: '0644'
     content: |
       deny = 0
+  - path: /etc/sudoers.d/{{ .GuestUser }}
+    owner: root:root
+    permissions: '0440'
+    content: |
+      {{ .GuestUser }} ALL=(ALL) NOPASSWD:ALL
+  - path: /etc/ssh/sshd_config.d/00-pwauth.conf
+    owner: root:root
+    permissions: '0644'
+    content: |
+      PasswordAuthentication yes
+      KbdInteractiveAuthentication yes
+      GSSAPIAuthentication no
+      UseDNS no
 {{- range .ExtraWriteFiles }}
   - path: {{ .Path }}
     owner: {{ .Owner }}
@@ -16,7 +29,9 @@ write_files:
 {{ indent 6 .Content }}
 {{- end }}
 runcmd:
-  - {{ .FaillockCommand }}
+  - {{ yamlQuote .FaillockCommand }}
+  - {{ yamlQuote .ForcePasswordSSHCommand }}
+  - {{ yamlQuote .EnableSSHDCommand }}
 {{- range .ExtraRuncmds }}
-  - {{ . }}
+  - {{ yamlQuote . }}
 {{- end }}

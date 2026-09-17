@@ -1213,8 +1213,10 @@ func (h *Harness) runSSHOnDeviceLocalPort(port int, user, password string, lastL
 	}
 	quotedPassword := shellQuote(password)
 	remoteCommand := strings.Join(quotedRemoteArgs, " ")
+	// Password only: a forwarded agent and Fedora's default GSSAPI methods each count
+	// toward sshd MaxAuthTries, so the guest disconnects before password auth runs.
 	sshCommand := fmt.Sprintf(
-		`ssh -T -p %d -o ConnectTimeout=10 -o RequestTTY=no -o PubkeyAuthentication=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR %s %s`,
+		`ssh -T -p %d -o ConnectTimeout=10 -o RequestTTY=no -o PreferredAuthentications=password -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o GSSAPIAuthentication=no -o IdentityAgent=none -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=1 -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR %s %s`,
 		port,
 		shellQuote(user+"@127.0.0.1"),
 		remoteCommand,
@@ -1226,6 +1228,7 @@ ssh_home=$(mktemp -d)
 trap 'rm -rf "$ssh_home"' EXIT
 export HOME="$ssh_home"
 export PATH=/usr/local/bin:/usr/bin:/bin
+unset SSH_AUTH_SOCK
 if command -v sshpass >/dev/null 2>&1; then
   sshpass -p %s %s
 else
