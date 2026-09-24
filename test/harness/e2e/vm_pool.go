@@ -492,7 +492,7 @@ func CreateFreshVMWithTPM(workerID int, tempDir string, sshPortBase int, tpmDevi
 
 	vmPool := GetOrCreateVMPool(VMPoolConfig{
 		BaseDiskPath: baseDiskPath,
-		TempDir:      tempDir,
+		TempDir:      resolveVMPoolTempDir(tempDir),
 		SSHPortBase:  sshPortBase,
 	})
 
@@ -696,11 +696,18 @@ func SetupVMForWorker(workerID int, tempDir string, sshPortBase int) (vm.TestVMI
 
 	vmPool := GetOrCreateVMPool(VMPoolConfig{
 		BaseDiskPath: baseDiskPath,
-		TempDir:      tempDir,
+		TempDir:      resolveVMPoolTempDir(tempDir),
 		SSHPortBase:  sshPortBase,
 	})
 
 	return vmPool.GetVMForWorker(workerID)
+}
+
+func resolveVMPoolTempDir(explicit string) string {
+	if d := strings.TrimSpace(os.Getenv(vm.EnvVMDiskDir)); d != "" {
+		return d
+	}
+	return explicit
 }
 
 // SetupFreshVMForWorker is a convenience function that initializes the VM pool and returns a fresh VM.
@@ -714,7 +721,7 @@ func SetupFreshVMForWorker(workerID int, tempDir string, sshPortBase int) (vm.Te
 
 	vmPool := GetOrCreateVMPool(VMPoolConfig{
 		BaseDiskPath: baseDiskPath,
-		TempDir:      tempDir,
+		TempDir:      resolveVMPoolTempDir(tempDir),
 		SSHPortBase:  sshPortBase,
 	})
 

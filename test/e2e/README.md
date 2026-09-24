@@ -193,6 +193,19 @@ export E2E_AUX_HOST=192.168.122.10   # VM IP on the OCP network
 make run-e2e-test
 ```
 
+To run **agent guests on the hypervisor** (not nested inside the test VM), attach them to the same libvirt network and keep overlay disks on a path qemu on the hypervisor can open:
+
+```bash
+export E2E_LIBVIRT_URI='qemu+ssh://kni@192.168.122.1/system?keyfile=/home/kni/.ssh/id_rsa&no_verify=1'
+export E2E_VM_NETWORK=flightctl-net          # virsh net-list on the hypervisor
+export E2E_VM_DISK_DIR=/var/lib/libvirt/images/flightctl-e2e
+export E2E_AUX_HOST=192.168.122.10           # test-vm IP on that network
+
+make run-e2e-test GO_E2E_DIRS=test/e2e/agent GINKGO_FOCUS="Verify VM agent"
+```
+
+The harness then uses a virtio NIC on `E2E_VM_NETWORK`, waits for a DHCP lease, and SSHes to that address on port 22. Leave these unset for the default nested QEMU user-net setup.
+
 ## OCP test VM (imagebuilder / non-suitable host)
 
 If your host is not suitable for the bootc image builder:
