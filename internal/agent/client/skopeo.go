@@ -276,7 +276,7 @@ func platformDigestFromRawManifest(raw string, expectedDigest digest.Digest) (st
 }
 
 // ListReferrers returns the referrers index for image.
-// On Referrers-API 404, unknown subcommand, or manifest unknown, it inspects the
+// On Referrers-API 404, a missing subcommand, or manifest unknown, it inspects the
 // Referrers Tag Schema tag on the same repository.
 func (s *Skopeo) ListReferrers(ctx context.Context, image string, opts ...ClientOption) (*OCIIndex, error) {
 	options := &clientOptions{}
@@ -417,5 +417,6 @@ func isReferrersFallback(stderr string) bool {
 	return strings.Contains(s, "manifest unknown") ||
 		strings.Contains(s, "404") ||
 		strings.Contains(s, "unknown command") ||
+		strings.Contains(s, "unrecognized command") ||
 		strings.Contains(s, "unknown flag")
 }

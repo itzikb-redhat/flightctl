@@ -103,8 +103,13 @@ var _ = Describe("discovered delta", Label("delta", "discovery", "slow", "vm"), 
 		Expect(err).NotTo(HaveOccurred())
 		quadletVolumeSourceDigest, err := reportedApplicationImageDigest(harness, deviceID, applicationDeltaQuadletName, quadletVolumeSource.image)
 		Expect(err).NotTo(HaveOccurred())
-		vmSourceDigest, err := reportedApplicationImageDigest(harness, deviceID, applicationDeltaVMName, vmSource.image)
-		Expect(err).NotTo(HaveOccurred())
+		// The VM can be Running before the containerdisk helper reports its digest.
+		var vmSourceDigest string
+		Eventually(func() error {
+			var digestErr error
+			vmSourceDigest, digestErr = reportedApplicationImageDigest(harness, deviceID, applicationDeltaVMName, vmSource.image)
+			return digestErr
+		}, util.LONG_TIMEOUT, util.POLLING).Should(Succeed())
 
 		nginxTarget, err := buildApplicationDeltaTargetImage(
 			harness, registry, tagPrefix+"-nginx-v2", applicationDeltaNginxRepo, nginxSource,
@@ -145,6 +150,11 @@ var _ = Describe("discovered delta", Label("delta", "discovery", "slow", "vm"), 
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(discoveredDeltaReferrer(harness, registry, published.target.repository, published.sourceDigest, published.target.targetDigest),
 				util.LONG_TIMEOUT, util.POLLING).Should(Succeed())
+		}
+		// Publishing copies each target image on the device. A local copy makes
+		// prefetch report NotRequired and skip referrer discovery.
+		for _, target := range allTargets {
+			removeDeviceImageIfPresent(harness, target.image)
 		}
 
 		By("updating the four non-Helm applications without rendered delta hints")
@@ -219,6 +229,7 @@ var _ = Describe("discovered delta", Label("delta", "discovery", "slow", "vm"), 
 		Expect(deleteDiscoveredDeltaLayer(registry, target.repository, artifact)).To(Succeed())
 		Eventually(discoveredDeltaReferrer(harness, registry, target.repository, sourceDigest, target.targetDigest),
 			util.LONG_TIMEOUT, util.POLLING).Should(Succeed())
+		removeDeviceImageIfPresent(harness, target.image)
 
 		By("updating the container without a rendered delta hint")
 		before := getDeltaDevice(harness, deviceID)
@@ -284,6 +295,7 @@ var _ = Describe("discovered delta", Label("delta", "discovery", "slow", "vm"), 
 			util.LONG_TIMEOUT, util.POLLING).Should(Succeed())
 		Eventually(discoveredDeltaReferrer(harness, registry, target.repository, closerSourceDigest, target.targetDigest),
 			util.LONG_TIMEOUT, util.POLLING).Should(Succeed())
+		removeDeviceImageIfPresent(harness, target.image)
 
 		By("updating one Compose image while retaining both local sources")
 		before := getDeltaDevice(harness, deviceID)
@@ -321,7 +333,8 @@ func publishDiscoveredDelta(harness *e2e.Harness, registry, tag, targetRepositor
 	targetTag := applicationDeltaTargetTag(tag)
 	registerApplicationImageCleanup(repositoryPath, targetTag)
 	deltaImage := applicationImageReference(registry, repositoryPath, targetTag)
-	workDir := "/tmp/flightctl-delta-discovery-" + tag
+	// /tmp is a small tmpfs on the composefs agent. /var is the writable disk.
+	workDir := "/var/tmp/flightctl-delta-discovery-" + tag
 	commands := []string{
 		"set -eu",
 		fmt.Sprintf("work=%s", shellQuote(workDir)),
@@ -329,9 +342,9 @@ func publishDiscoveredDelta(harness *e2e.Harness, registry, tag, targetRepositor
 		"rm -rf \"$work\"",
 		"mkdir -p \"$work/source\" \"$work/target\" \"$work/delta\"",
 		"trap 'rm -rf \"$work\"' EXIT",
-		fmt.Sprintf("skopeo copy --src-tls-verify=false %s oci:$work/source:img",
+		fmt.Sprintf("skopeo copy --preserve-digests --src-tls-verify=false %s oci:$work/source:img",
 			shellQuote("docker://"+sourceRef)),
-		fmt.Sprintf("skopeo copy --src-tls-verify=false %s oci:$work/target:img",
+		fmt.Sprintf("skopeo copy --preserve-digests --src-tls-verify=false %s oci:$work/target:img",
 			shellQuote("docker://"+targetRef)),
 		"oci-delta create oci:$work/source:img oci:$work/target:img oci:$work/delta:img",
 		fmt.Sprintf("skopeo copy --preserve-digests --dest-tls-verify=false oci:$work/delta:img %s",
@@ -344,6 +357,9 @@ func publishDiscoveredDelta(harness *e2e.Harness, registry, tag, targetRepositor
 	deltaDigest, err := resolveApplicationImageDigest(harness, registry, repositoryPath, targetTag)
 	if err != nil {
 		return discoveredDeltaArtifact{}, fmt.Errorf("resolve externally generated delta %s: %w", deltaImage, err)
+	}
+	if err := harness.IndexReferrer(registry, repositoryPath, targetTag); err != nil {
+		return discoveredDeltaArtifact{}, fmt.Errorf("index externally generated delta %s: %w", deltaImage, err)
 	}
 	reference, err := applicationImageDigestReference(deltaImage, deltaDigest)
 	if err != nil {

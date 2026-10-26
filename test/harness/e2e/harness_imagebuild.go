@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -705,6 +706,48 @@ func (h *Harness) FetchReferrersWithCredentials(registry, imageName, digest, use
 	}
 
 	return referrers, nil
+}
+
+// IndexReferrer records an existing manifest in the referrers tag schema.
+// skopeo copy uploads a manifest that names its subject, but it does not create
+// the sha256-<digest> tag. Registries without the Referrers API only list
+// referrers from that tag, so oras re-pushes the manifest and updates the index.
+// An existing index is extended, which keeps every referrer for one subject.
+func (h *Harness) IndexReferrer(registry, imageName, tag string) error {
+	ref := fmt.Sprintf("%s/%s", registry, imageName)
+	repo, err := remote.NewRepository(ref)
+	if err != nil {
+		return fmt.Errorf("create repository reference for %s: %w", ref, err)
+	}
+	repo.Client = newRegistryClient("", "")
+	repo.SkipReferrersGC = true
+
+	ctx, cancel := context.WithTimeout(h.Context, 30*time.Second)
+	defer cancel()
+
+	desc, rc, err := repo.FetchReference(ctx, tag)
+	if err != nil {
+		return fmt.Errorf("fetch manifest %s:%s: %w", ref, tag, err)
+	}
+	body, readErr := io.ReadAll(rc)
+	closeErr := rc.Close()
+	if readErr != nil {
+		return fmt.Errorf("read manifest %s:%s: %w", ref, tag, readErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close manifest %s:%s: %w", ref, tag, closeErr)
+	}
+	if got := digest.FromBytes(body); got != desc.Digest {
+		return fmt.Errorf("manifest %s:%s digest %s does not match body %s", ref, tag, desc.Digest, got)
+	}
+	if desc.MediaType != ocispec.MediaTypeImageManifest {
+		return fmt.Errorf("manifest %s:%s has media type %s", ref, tag, desc.MediaType)
+	}
+	desc.Size = int64(len(body))
+	if err := repo.PushReference(ctx, desc, bytes.NewReader(body), tag); err != nil {
+		return fmt.Errorf("index referrers for %s:%s: %w", ref, tag, err)
+	}
+	return nil
 }
 
 // FetchSBOMContent fetches the SBOM content from the registry using the referrer descriptor.
